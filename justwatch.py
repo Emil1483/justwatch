@@ -6,6 +6,10 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
+from currency_converter import CurrencyConverter
+import pycountry
+
+currency = CurrencyConverter()
 
 url = "https://www.justwatch.com/no/movie/the-silence-of-the-lambs"
 
@@ -26,29 +30,59 @@ def get_countries():
 
 def wait_for(css_selector):
     wait(driver, 10).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
-    )
+            EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
+            )
 
-platform_data = {}
+streaming_platform_data = {}
+renting_platform_data = []
 
-def extract_data(country):
+def extract_streaming():
     soup = BeautifulSoup(driver.page_source, "html.parser")
     app = soup.find(id='app')
-    platform_row = app.find(class_="price-comparison__grid__row price-comparison__grid__row--stream")
-    if platform_row is None: return
-    platforms = platform_row.find_all(class_="price-comparison__grid__row__element")
-    platforms = [platform.find("img")["alt"] for platform in platforms]
-    for platform in platforms:
-        if platform in platform_data:
-            platform_data[platform].append(country)
+    streaming_platform_row = app.find(class_="price-comparison__grid__row price-comparison__grid__row--stream")
+    if streaming_platform_row is None: return []
+    streaming_platforms = streaming_platform_row.find_all(class_="price-comparison__grid__row__element")
+    streaming_platforms = [streaming_platform.find("img")["alt"] for streaming_platform in streaming_platforms]
+    return streaming_platforms
+
+def extract_price(text, country_name):
+    country = pycountry.countries.get(name=country_name)
+    currency = pycountry.currencies.get(numeric=country.numeric)
+    print(country)
+    print(currency)
+    currency_code = currency.alpha_3
+    print(currency_code)
+    return text
+
+def extract_renting(country):
+    # (20, 'Norway', 'Google Play')
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    renting_platform_row = soup.find(class_="price-comparison__grid__row price-comparison__grid__row--rent")
+    if renting_platform_row is None: return []
+    renting_platforms = renting_platform_row.find_all(class_="price-comparison__grid__row__element")
+    extracted_data = [
+            (renting_platform.find("img")["alt"],
+            extract_price(renting_platform.find(class_="price-comparison__grid__row__price").text, country),
+            country)
+            for renting_platform in renting_platforms]
+    return extracted_data
+
+def extract_data(country):
+    streaming_platforms = extract_streaming()
+    for streaming_platform in streaming_platforms:
+        if streaming_platform in streaming_platform_data:
+            streaming_platform_data[streaming_platform].append(country)
         else:
-            platform_data[platform] = [country]
+            streaming_platform_data[streaming_platform] = [country]
+
+    renting_platform_data.extend(extract_renting(country))
 
 click_dropdown()
 sleep(1)
 
 num_countries = len(get_countries())
 start_country = get_countries()[0].text
+extract_data(start_country)
 
 for i in range(1, num_countries):
     country = get_countries()[i]
@@ -67,4 +101,4 @@ for i in range(1, num_countries):
 
 driver.quit()
 
-print(platform_data)
+print(streaming_platform_data)
