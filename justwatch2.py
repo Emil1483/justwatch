@@ -2,6 +2,7 @@ import sys
 import requests
 from currency_converter import convert
 from progress.bar import IncrementalBar
+import inquirer
 
 locales = requests.get("http://apis.justwatch.com/content/locales/state").json()
 locales = [(locale["full_locale"], locale["country"]) for locale in locales]
@@ -25,18 +26,28 @@ for i, arg in enumerate(args):
     current_vals.append(arg)
     arg_map[current_key] = current_vals.copy()
 
-query = " ".join(arg_map["first_arg"])
+query_name = " ".join(arg_map["first_arg"])
 prioritised = arg_map["--on"]
 preferred_currency = "".join(arg_map["--curr"])
 
-query = query.replace(" ", "%20")
+query = query_name.replace(" ", "%20")
 search_body = f"%7B\"page_size\":5,\"page\":1,\"query\":\"{query}\",\"content_types\":[\"movie\",\"show\"]%7D"
 
 query_result = requests.get(f"https://apis.justwatch.com/content/titles/pt_BR/popular?language=en&body={search_body}").json()
 
-id = query_result["items"][0]["id"]
-content_type = query_result["items"][0]["object_type"]
-title = query_result["items"][0]["title"]
+alternatives = [
+  inquirer.List("choice",
+                message=f"Results for \"{query_name}\"",
+                choices=[item["title"] for item in query_result["items"]],
+            ),
+]
+choice = inquirer.prompt(alternatives)["choice"]
+
+entity = next((item for item in query_result["items"] if item["title"] == choice), None)
+
+id = entity["id"]
+content_type = entity["object_type"]
+title = entity["title"]
 
 def simplify_url(url):
     split = url.split("/")
@@ -143,11 +154,3 @@ def print_offers_data(headline, data):
 
 print_offers_data("RENTING OFFERS", renting_offers_data)
 print_offers_data("BUYING OFFERS", buying_offers_data)
-
-# DONE: show renting offers with padding
-# DONE: wait to show more for each renting offer
-# DONE: do the same for buying offers
-# DONE: implement search
-# DONE: sys args for search query and streaming service
-# DONE: options to skip category when printing
-# DONE: automatically update the API key
