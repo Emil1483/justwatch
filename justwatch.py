@@ -1,104 +1,158 @@
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait as wait
-from time import sleep
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
-from currency_converter import CurrencyConverter
-import pycountry
+import sys
+import requests
+from currency_converter import convert
+from progress.bar import IncrementalBar
+import inquirer
 
-currency = CurrencyConverter()
+locales = requests.get("http://apis.justwatch.com/content/locales/state").json()
+locales = [(locale["full_locale"], locale["country"]) for locale in locales]
 
-url = "https://www.justwatch.com/no/movie/the-silence-of-the-lambs"
+exchange_rates = {}
 
-driver = webdriver.Chrome("E:\development\chrome-driver\chromedriver")
+args = sys.argv[1:]
 
-driver.get(url)
+if len(args) == 0: raise TypeError("missing 1 required argument \"query\"")
 
-dropdown_css_selector = ".jw-chip-button.active a"
-countries_css_selector = ".country-list-item .country-list-item__container a"
-watch_now_css_selector = ".detail-infos__subheading"
+arg_map = dict()
 
-def click_dropdown():
-    element = driver.find_elements_by_css_selector(dropdown_css_selector)[-1]
-    element.click()
+current_key = "first_arg"
+current_vals = []
+for i, arg in enumerate(args):
+    if arg.startswith("-"):
+        current_key = arg
+        current_vals.clear()
+        continue
+    
+    current_vals.append(arg)
+    arg_map[current_key] = current_vals.copy()
 
-def get_countries():
-    return driver.find_elements_by_css_selector(countries_css_selector)
+query_name = " ".join(arg_map["first_arg"])
+prioritised = arg_map["--on"] if "--on" in arg_map else ["netflix"]
+preferred_currency = "".join(arg_map["--curr"]) if "-curr" in arg_map else "NOK"
 
-def wait_for(css_selector):
-    wait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
-            )
+query = query_name.replace(" ", "%20")
+search_body = f"%7B\"page_size\":10,\"page\":1,\"query\":\"{query}\",\"content_types\":[\"movie\",\"show\"]%7D"
 
-streaming_platform_data = {}
-renting_platform_data = []
+query_result = requests.get(f"https://apis.justwatch.com/content/titles/pt_BR/popular?language=en&body={search_body}").json()
 
-def extract_streaming():
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    app = soup.find(id='app')
-    streaming_platform_row = app.find(class_="price-comparison__grid__row price-comparison__grid__row--stream")
-    if streaming_platform_row is None: return []
-    streaming_platforms = streaming_platform_row.find_all(class_="price-comparison__grid__row__element")
-    streaming_platforms = [streaming_platform.find("img")["alt"] for streaming_platform in streaming_platforms]
-    return streaming_platforms
+if len(query_result["items"]) == 0: raise ValueError(f"Could not find any results for \"{query_name}\"")
 
-def extract_price(text, country_name):
-    country = pycountry.countries.get(name=country_name)
-    currency = pycountry.currencies.get(numeric=country.numeric)
-    print(country)
-    print(currency)
-    currency_code = currency.alpha_3
-    print(currency_code)
-    return text
+alternatives = [
+  inquirer.List("choice",
+                message=f"Results for \"{query_name}\"",
+                choices=[item["title"] for item in query_result["items"]],
+            ),
+]
+choice = inquirer.prompt(alternatives)["choice"]
 
-def extract_renting(country):
-    # (20, 'Norway', 'Google Play')
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    renting_platform_row = soup.find(class_="price-comparison__grid__row price-comparison__grid__row--rent")
-    if renting_platform_row is None: return []
-    renting_platforms = renting_platform_row.find_all(class_="price-comparison__grid__row__element")
-    extracted_data = [
-            (renting_platform.find("img")["alt"],
-            extract_price(renting_platform.find(class_="price-comparison__grid__row__price").text, country),
-            country)
-            for renting_platform in renting_platforms]
-    return extracted_data
+entity = next((item for item in query_result["items"] if item["title"] == choice), None)
 
-def extract_data(country):
-    streaming_platforms = extract_streaming()
-    for streaming_platform in streaming_platforms:
-        if streaming_platform in streaming_platform_data:
-            streaming_platform_data[streaming_platform].append(country)
-        else:
-            streaming_platform_data[streaming_platform] = [country]
+id = entity["id"]
+content_type = entity["object_type"]
+title = entity["title"]
 
-    renting_platform_data.extend(extract_renting(country))
+def simplify_url(url):
+    split = url.split("/")
+    for part in split:
+        if '.' in part: return part
+    raise ValueError(f"{url} could not be simplified")
 
-click_dropdown()
-sleep(1)
+def extract_service_url(offer):
+    return simplify_url(list(offer["urls"].values())[0])
 
-num_countries = len(get_countries())
-start_country = get_countries()[0].text
-extract_data(start_country)
+def extract_offers(offers, list, location):
+    for offer in offers:
+        if "retail_price" not in offer: continue
+        price = offer["retail_price"]
+        currency = offer["currency"]
 
-for i in range(1, num_countries):
-    country = get_countries()[i]
-    actions = ActionChains(driver)
-    actions.move_to_element(country).perform()
-    if country.text == start_country: continue
-    country_name = country.text
-    country.click()
-    wait_for(watch_now_css_selector)
-    extract_data(country_name)
-    driver.back()
-    driver.refresh()
-    wait_for(dropdown_css_selector)
-    click_dropdown()
-    wait_for(countries_css_selector)
+        price_NOK = convert(price, currency, preferred_currency)
 
-driver.quit()
+        list.append((price_NOK, extract_service_url(offer), location))
 
-print(streaming_platform_data)
+streaming_services_data = {}
+renting_offers_data = []
+buying_offers_data = []
+
+with IncrementalBar(f"Searching for places to watch \"{title}\"", max=len(locales), suffix="%(index)d / %(max)d countries checked") as bar:
+    for locale, location in locales:
+        offers = requests.get(f"http://apis.justwatch.com/content/titles/{content_type}/{id}/locale/{locale}").json()
+
+        bar.next()
+
+        if "offers" not in offers: continue
+
+        offers = offers["offers"]
+        offers = [(offer, offer["monetization_type"]) for offer in offers]
+
+        streaming_services = [extract_service_url(offer) for offer, type in offers if type == "flatrate"]
+        renting_offers = [offer for offer, type in offers if type == "rent"]
+        buying_offers = [offer for offer, type in offers if type == "buy"]
+
+        for streaming_service in streaming_services:
+            if streaming_service not in streaming_services_data:
+                streaming_services_data[streaming_service] = [location]
+            elif location not in streaming_services_data[streaming_service]:
+                streaming_services_data[streaming_service].append(location)
+
+        extract_offers(renting_offers, renting_offers_data, location)
+        extract_offers(buying_offers, buying_offers_data, location)
+
+renting_offers_data = list(dict.fromkeys(renting_offers_data))
+renting_offers_data.sort(key=lambda offer: offer[0])
+
+buying_offers_data = list(dict.fromkeys(buying_offers_data))
+buying_offers_data.sort(key=lambda offer: offer[0])
+
+def is_prioritised(service):
+    for prioritised_service in prioritised:
+        if prioritised_service in service: return True
+    return False
+
+prioritised_services = [
+        (service, locations) for service, locations in streaming_services_data.items()
+        if is_prioritised(service)]
+
+def print_service(service, locations):
+    print(service)
+    for location in locations:
+        print(" " * 4 + location)
+
+def wait_to_show_more():
+    skip = input("Press ENTER to show more (\"s\" to skip) ") in ["s", "skip", "h", "n", "e", "end"]
+    print("\033[A", end="\r\033[K")
+    return skip
+
+for service in prioritised_services:
+    print_service(*service)
+    skip = wait_to_show_more()
+    if skip: break
+
+print()
+
+for service, locations in streaming_services_data.items():
+    if is_prioritised(service): continue
+    locations.sort()
+    print_service(service, locations)
+    skip = wait_to_show_more()
+    if skip: break
+
+def pad_string(string, length):
+    return string + " " * (length - len(string))
+
+def print_offers_data(headline, data):
+    if len(data) == 0: return
+    website_lens = [len(site) for _, site, __ in data]
+    max_website_len = max(website_lens)
+
+    print(f"\n{headline}\n")
+    for i in range(len(data)):
+        price, website, location = data[i]
+        website_string = pad_string(website, max_website_len)
+        print(f"{website_string}    for {price:.2f} {preferred_currency}, in {location}")
+        if i % 3 == 0: 
+            skip = wait_to_show_more()
+            if skip: break
+
+print_offers_data("RENTING OFFERS", renting_offers_data)
+print_offers_data("BUYING OFFERS", buying_offers_data)
