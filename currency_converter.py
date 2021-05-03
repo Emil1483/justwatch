@@ -16,13 +16,9 @@ def process_browser_logs_for_network_events(logs):
 
 
 def get_nested_value(json, *keys):
-    current = json
-    for key in keys:
-        if key in current:
-            current = current[key]
-        else:
-            return None
-    return current
+    if keys[0] not in json: return None
+    if len(keys) == 1: return json[keys[0]]
+    return get_nested_value(json[keys[0]], *keys[1:])
 
 def get_auth():
     capabilities = DesiredCapabilities.CHROME
@@ -54,10 +50,13 @@ auth_token = open("auth.txt", "r").read()
 auth_header = {"authorization": auth_token}
 
 response = requests.get(url, headers=auth_header)
-if response.status_code == 403:
+if response.status_code != 200:
     response = requests.get(url, headers={"authorization": get_auth()})
 
 rates = response.json()["rates"]
 
 def convert(value, old, new):
     return value * rates[new] / rates[old]
+
+if __name__ == '__main__':
+    print(convert(10, "USD", "NOK"))

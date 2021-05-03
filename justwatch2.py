@@ -1,12 +1,34 @@
+import sys
 import requests
 from currency_converter import convert
+from progress.bar import IncrementalBar
 
 locales = requests.get("http://apis.justwatch.com/content/locales/state").json()
 locales = [(locale["full_locale"], locale["country"]) for locale in locales]
 
 exchange_rates = {}
 
-query = "south park"
+args = sys.argv[1:]
+
+if len(args) == 0: raise TypeError("missing 1 required argument \"query\"")
+
+arg_map = dict()
+
+current_key = "first_arg"
+current_vals = []
+for i, arg in enumerate(args):
+    if arg.startswith("-"):
+        current_key = arg
+        current_vals.clear()
+        continue
+    
+    current_vals.append(arg)
+    arg_map[current_key] = current_vals.copy()
+
+query = " ".join(arg_map["first_arg"])
+prioritised = arg_map["--on"]
+preferred_currency = "".join(arg_map["--curr"])
+
 query = query.replace(" ", "%20")
 search_body = f"%7B\"page_size\":5,\"page\":1,\"query\":\"{query}\",\"content_types\":[\"movie\",\"show\"]%7D"
 
@@ -14,6 +36,7 @@ query_result = requests.get(f"https://apis.justwatch.com/content/titles/pt_BR/po
 
 id = query_result["items"][0]["id"]
 content_type = query_result["items"][0]["object_type"]
+title = query_result["items"][0]["title"]
 
 def simplify_url(url):
     split = url.split("/")
@@ -30,7 +53,7 @@ def extract_offers(offers, list, location):
         price = offer["retail_price"]
         currency = offer["currency"]
 
-        price_NOK = convert(price, currency, "NOK")
+        price_NOK = convert(price, currency, preferred_currency)
 
         list.append((price_NOK, extract_service_url(offer), location))
 
@@ -38,33 +61,35 @@ streaming_services_data = {}
 renting_offers_data = []
 buying_offers_data = []
 
-for locale, location in locales:
-    offers = requests.get(f"http://apis.justwatch.com/content/titles/{content_type}/{id}/locale/{locale}").json()
-    if "offers" not in offers: continue
+with IncrementalBar(f"Searching for places to watch \"{title}\"", max=len(locales), suffix="%(index)d / %(max)d countries checked") as bar:
+    for locale, location in locales:
+        offers = requests.get(f"http://apis.justwatch.com/content/titles/{content_type}/{id}/locale/{locale}").json()
 
-    offers = offers["offers"]
-    offers = [(offer, offer["monetization_type"]) for offer in offers]
+        bar.next()
 
-    streaming_services = [extract_service_url(offer) for offer, type in offers if type == "flatrate"]
-    renting_offers = [offer for offer, type in offers if type == "rent"]
-    buying_offers = [offer for offer, type in offers if type == "buy"]
+        if "offers" not in offers: continue
 
-    for streaming_service in streaming_services:
-        if streaming_service not in streaming_services_data:
-            streaming_services_data[streaming_service] = [location]
-        elif location not in streaming_services_data[streaming_service]:
-            streaming_services_data[streaming_service].append(location)
+        offers = offers["offers"]
+        offers = [(offer, offer["monetization_type"]) for offer in offers]
 
-    extract_offers(renting_offers, renting_offers_data, location)
-    extract_offers(buying_offers, buying_offers_data, location)
+        streaming_services = [extract_service_url(offer) for offer, type in offers if type == "flatrate"]
+        renting_offers = [offer for offer, type in offers if type == "rent"]
+        buying_offers = [offer for offer, type in offers if type == "buy"]
+
+        for streaming_service in streaming_services:
+            if streaming_service not in streaming_services_data:
+                streaming_services_data[streaming_service] = [location]
+            elif location not in streaming_services_data[streaming_service]:
+                streaming_services_data[streaming_service].append(location)
+
+        extract_offers(renting_offers, renting_offers_data, location)
+        extract_offers(buying_offers, buying_offers_data, location)
 
 renting_offers_data = list(dict.fromkeys(renting_offers_data))
 renting_offers_data.sort(key=lambda offer: offer[0])
 
 buying_offers_data = list(dict.fromkeys(buying_offers_data))
 buying_offers_data.sort(key=lambda offer: offer[0])
-
-prioritised = ("viaplay", "netflix", "tv2")
 
 def is_prioritised(service):
     for prioritised_service in prioritised:
@@ -81,12 +106,14 @@ def print_service(service, locations):
         print(" " * 4 + location)
 
 def wait_to_show_more():
-    input("Press ENTER to show more")
+    skip = input("Press ENTER to show more (\"s\" to skip) ") in ["s", "skip", "h", "n", "e", "end"]
     print("\033[A", end="\r\033[K")
+    return skip
 
 for service in prioritised_services:
     print_service(*service)
-    wait_to_show_more()
+    skip = wait_to_show_more()
+    if skip: break
 
 print()
 
@@ -94,7 +121,8 @@ for service, locations in streaming_services_data.items():
     if is_prioritised(service): continue
     locations.sort()
     print_service(service, locations)
-    wait_to_show_more()
+    skip = wait_to_show_more()
+    if skip: break
 
 def pad_string(string, length):
     return string + " " * (length - len(string))
@@ -108,8 +136,10 @@ def print_offers_data(headline, data):
     for i in range(len(data)):
         price, website, location = data[i]
         website_string = pad_string(website, max_website_len)
-        print(f"{website_string}    for {price:.2f} kr, in {location}")
-        if i % 3 == 0: wait_to_show_more()
+        print(f"{website_string}    for {price:.2f} {preferred_currency}, in {location}")
+        if i % 3 == 0: 
+            skip = wait_to_show_more()
+            if skip: break
 
 print_offers_data("RENTING OFFERS", renting_offers_data)
 print_offers_data("BUYING OFFERS", buying_offers_data)
@@ -118,6 +148,6 @@ print_offers_data("BUYING OFFERS", buying_offers_data)
 # DONE: wait to show more for each renting offer
 # DONE: do the same for buying offers
 # DONE: implement search
-# TODO: sys args for search query and streaming service
-# TODO: options to skip category when printing
+# DONE: sys args for search query and streaming service
+# DONE: options to skip category when printing
 # DONE: automatically update the API key
