@@ -27,8 +27,8 @@ for i, arg in enumerate(args):
     arg_map[current_key] = current_vals.copy()
 
 query_name = " ".join(arg_map["first_arg"])
-prioritised = arg_map["--on"]
-preferred_currency = "".join(arg_map["--curr"])
+prioritised = arg_map["--on"] if "--on" in arg_map else ["netflix"]
+preferred_currency = "".join(arg_map["--curr"]) if "-curr" in arg_map else "NOK"
 
 query = query_name.replace(" ", "%20")
 search_body = f"%7B\"page_size\":5,\"page\":1,\"query\":\"{query}\",\"content_types\":[\"movie\",\"show\"]%7D"
