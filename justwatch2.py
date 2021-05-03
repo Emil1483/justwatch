@@ -31,9 +31,11 @@ prioritised = arg_map["--on"] if "--on" in arg_map else ["netflix"]
 preferred_currency = "".join(arg_map["--curr"]) if "-curr" in arg_map else "NOK"
 
 query = query_name.replace(" ", "%20")
-search_body = f"%7B\"page_size\":5,\"page\":1,\"query\":\"{query}\",\"content_types\":[\"movie\",\"show\"]%7D"
+search_body = f"%7B\"page_size\":10,\"page\":1,\"query\":\"{query}\",\"content_types\":[\"movie\",\"show\"]%7D"
 
 query_result = requests.get(f"https://apis.justwatch.com/content/titles/pt_BR/popular?language=en&body={search_body}").json()
+
+if len(query_result["items"]) == 0: raise ValueError(f"Could not find any results for \"{query_name}\"")
 
 alternatives = [
   inquirer.List("choice",
