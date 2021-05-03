@@ -1,6 +1,6 @@
 import sys
 import requests
-from currency_converter import convert
+from currency_converter import convert, rates
 from progress.bar import IncrementalBar
 import inquirer
 
@@ -11,7 +11,10 @@ exchange_rates = {}
 
 args = sys.argv[1:]
 
-if len(args) == 0: raise TypeError("missing 1 required argument \"query\"")
+if len(args) == 0:
+    raise TypeError("\n\nMissing 1 required argument \"search-term\"\n"
+    + "For example, run:\n"
+    + "python justwatch.py hunger games --on netflix --curr NOK")
 
 arg_map = dict()
 
@@ -28,7 +31,11 @@ for i, arg in enumerate(args):
 
 query_name = " ".join(arg_map["first_arg"])
 prioritised = arg_map["--on"] if "--on" in arg_map else ["netflix"]
-preferred_currency = "".join(arg_map["--curr"]) if "-curr" in arg_map else "NOK"
+preferred_currency = "".join(arg_map["--curr"]) if "--curr" in arg_map else "NOK"
+preferred_currency = preferred_currency.upper()
+
+if preferred_currency not in rates:
+    raise ValueError(f"\n\nCould not recognize \"{preferred_currency}\" as a currency")
 
 query = query_name.replace(" ", "%20")
 search_body = f"%7B\"page_size\":10,\"page\":1,\"query\":\"{query}\",\"content_types\":[\"movie\",\"show\"]%7D"
