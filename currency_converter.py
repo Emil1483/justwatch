@@ -2,6 +2,7 @@ import requests
 from selenium import webdriver
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 import json
 
 def process_browser_logs_for_network_events(logs):
@@ -29,7 +30,7 @@ def get_auth():
     options.add_argument('--disable-gpu')
 
     driver = webdriver.Chrome(
-        "E:\development\chrome-driver\chromedriver.exe",
+        ChromeDriverManager().install(),
         desired_capabilities=capabilities,
         chrome_options=options
     )
