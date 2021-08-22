@@ -2,8 +2,8 @@ import requests
 from selenium import webdriver
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 import json
-import chromedriver_binary
 
 def process_browser_logs_for_network_events(logs):
     for entry in logs:
@@ -29,7 +29,11 @@ def get_auth():
     options.add_argument('--headless')
     options.add_argument('--disable-gpu')
 
-    driver = webdriver.Chrome()
+    driver = webdriver.Chrome(
+        ChromeDriverManager().install(),
+        desired_capabilities=capabilities,
+        chrome_options=options
+    )
 
     driver.get("http://www.xe.com")
     logs = driver.get_log("performance")
