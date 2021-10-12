@@ -34,7 +34,7 @@ prioritised = arg_map["--on"] if "--on" in arg_map else ["netflix"]
 preferred_currency = "".join(arg_map["--curr"]) if "--curr" in arg_map else "NOK"
 preferred_currency = preferred_currency.upper()
 
-if preferred_currency not in rates:
+if rates is not None and preferred_currency not in rates:
     raise ValueError(f"\n\nCould not recognize \"{preferred_currency}\" as a currency")
 
 query = query_name.replace(" ", "%20")
@@ -68,6 +68,8 @@ def extract_service_url(offer):
     return simplify_url(list(offer["urls"].values())[0])
 
 def extract_offers(offers, list, location):
+    if rates is None: return
+
     for offer in offers:
         if "retail_price" not in offer: continue
         price = offer["retail_price"]

@@ -4,6 +4,18 @@ from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 import json
+import warnings
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 def process_browser_logs_for_network_events(logs):
     for entry in logs:
@@ -21,7 +33,22 @@ def get_nested_value(json, *keys):
     if len(keys) == 1: return json[keys[0]]
     return get_nested_value(json[keys[0]], *keys[1:])
 
+def get_auth_from_event(event):
+    return get_nested_value(event, "params", "request", "headers", "authorization")
+
+def get_auth_from_event_reserve(event):
+    auth = str(event)
+    index = auth.find('authorization')
+
+    if index == -1: return
+
+    auth = auth[index + 17:]
+
+    return auth.split("'")[0]
+
 def get_auth():
+    print(f"{bcolors.OKCYAN}Retrieving currency auth token{bcolors.ENDC}")
+
     capabilities = DesiredCapabilities.CHROME
     capabilities["goog:loggingPrefs"] = {"performance": "ALL"}  # chromedriver 75+
 
@@ -38,11 +65,17 @@ def get_auth():
     driver.get("http://www.xe.com")
     logs = driver.get_log("performance")
     driver.quit()
-    events = process_browser_logs_for_network_events(logs)
+    events = [*process_browser_logs_for_network_events(logs)]
     with open("auth.txt", "wt") as f:
         for event in events:
-            auth = get_nested_value(event, "params", "response", "requestHeaders", "authorization")
-            if auth is not None:
+            if (auth := get_auth_from_event(event)) is not None:
+                f.write(auth)
+                return auth
+
+        print(f"{bcolors.WARNING}Warning: Using backup method to get currency auth token{bcolors.ENDC}")
+
+        for event in events:
+            if (auth := get_auth_from_event_reserve(event)) is not None:
                 f.write(auth)
                 return auth
 
@@ -52,9 +85,16 @@ auth_header = {"authorization": auth_token}
 
 response = requests.get(url, headers=auth_header)
 if response.status_code != 200:
-    response = requests.get(url, headers={"authorization": get_auth()})
+    auth = get_auth()
 
-rates = response.json()["rates"]
+    if auth is None:
+        response = None
+        print(f"{bcolors.FAIL}Alert: Could not get currency auth token. " +
+                f"We will only display subscription offers{bcolors.ENDC}")
+    else:
+        response = requests.get(url, headers={"authorization": auth})
+
+rates = response.json()["rates"] if response is not None else None
 
 def convert(value, old, new):
     return value * rates[new] / rates[old]
