@@ -4,7 +4,7 @@ from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 import json
-import warnings
+import os
 
 class bcolors:
     HEADER = '\033[95m'
@@ -80,7 +80,10 @@ def get_auth():
                 return auth
 
 url = "https://www.xe.com/api/protected/midmarket-converter/"
-auth_token = open("auth.txt", "r").read()
+
+path = os.path.dirname(os.path.realpath(__file__))
+auth_token = open(f"{path}/auth.txt", "r").read()
+
 auth_header = {"authorization": auth_token}
 
 response = requests.get(url, headers=auth_header)
